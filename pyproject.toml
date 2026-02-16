@@ -6,5 +6,27 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.129.0",
+    "hypercorn>=0.18.0",
     "uvicorn>=0.40.0",
 ]
+
+[tool.flake8]
+max-line-length = 88
+max-complexity = 12
+ignore = ["E402","E501","W503","D100","C901","B008"]
+exclude = "__init__.py"
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+default_section = "THIRDPARTY"
+known_first_party = []
+known_third_party = ["chromadb", "dotenv", "fastapi", "hypercorn", "pydantic", "pydantic_settings", "sentry_sdk", "tiktoken"]
+[tool.black]
+line-length = 88
+[tool.yapf]
+align_closing_bracket_with_visual_indent = true
+based_on_style = "google"
+coalesce_brackets = true
+column_limit = 119
+dedent_closing_brackets = true

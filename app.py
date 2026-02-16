@@ -1,5 +1,12 @@
-import uvicorn
+import asyncio
+
+from hypercorn.asyncio import serve
+from hypercorn.config import Config
+
 from src import app
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    config = Config()
+    config.bind = ["0.0.0.0:9000"]
+    config.use_reloader = False
+    asyncio.run(serve(app, config=config))
