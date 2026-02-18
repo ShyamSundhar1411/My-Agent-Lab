@@ -3,7 +3,7 @@ import asyncio
 from hypercorn.asyncio import serve
 from hypercorn.config import Config
 
-from src import app
+from src.main import app
 
 if __name__ == "__main__":
     config = Config()

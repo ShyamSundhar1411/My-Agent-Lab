@@ -5,13 +5,13 @@ This script sets up the FastAPI app, configures settings,
 and imports required modules (models, views, and routes).
 """
 
-
 import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.controllers.health_controller import health_router
+from src.routers.agent_lab_router import agent_lab_router
 
 SECRET_KEY = os.urandom(32)
 
@@ -57,3 +57,4 @@ app.add_middleware(
 
 
 app.include_router(health_router)
+app.include_router(agent_lab_router)

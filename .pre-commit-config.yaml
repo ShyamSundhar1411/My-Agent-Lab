@@ -1,4 +1,7 @@
+exclude: .*migrations/.*  # skip Django migrations
+
 repos:
+  # General file hygiene
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -8,32 +11,16 @@ repos:
       - id: check-json
       - id: check-added-large-files
 
-  - repo: https://github.com/PyCQA/flake8
-    rev: 6.1.0
-    hooks:
-      - additional_dependencies:
-          - flake8-bugbear
-          - flake8-comprehensions
-          - flake8-mutable
-          - flake8-print
-          - flake8-simplify
-          - flake8-pyproject
-        exclude: settings.py
-        id: flake8
-
-
-
-  - repo: https://github.com/asottile/seed-isort-config
-    rev: v2.2.0
-    hooks:
-      - id: seed-isort-config
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-
-
+  # Black for formatting
   - repo: https://github.com/psf/black
-    rev: 23.11.0
+    rev: 25.1.0
     hooks:
       - id: black
+
+  # Ruff for linting & import sorting
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.1.14  # use latest stable
+    hooks:
+      - id: ruff
+        args: [--fix]  # auto-fix imports & style
+        exclude: settings.py  # optional, like you had for flake8

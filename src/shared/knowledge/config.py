@@ -67,5 +67,9 @@ class Neo4JGraphClient:
             logger.error(f"Neo4j health check failed: {e}")
             return False
 
+    def query(self, cypher_query: str, params: dict = None):
+        graph = self.get_graph()
+        return graph.query(cypher_query, params)
+
 
 graph_kg_client = Neo4JGraphClient()
