@@ -50,3 +50,38 @@ class GraphStoreClient:
         self.query(
             query, params={"from_id": from_id, "to_id": to_id, "props": props or {}}
         )
+
+    def create_relationships(self, query: str):
+        self.query(query)
+
+    def create_vector_index(
+        self,
+        index_name: str,
+        node_label: str = "Chunk",
+        vector_property: str = "textEmbedding",
+        dimensions: int = 1536,
+    ):
+        """
+        Create a vector index on the specified node label and property.
+        """
+        vector_index_query = f"""
+        CREATE VECTOR INDEX {index_name} IF NOT EXISTS
+        FOR (n:{node_label}) ON (n.{vector_property})
+        OPTIONS {{indexConfig: {{
+        `vector.dimensions`: {dimensions},
+        `vector.similarity_function`: 'cosine'
+        }}}}
+        """
+        self.query(vector_index_query)
+
+    def delete_collection(self):
+        if not self.collection_name:
+            raise ValueError("Collection name is required to delete collection")
+
+        label_prefix = self._label_prefix.rstrip("_")
+        delete_query = f"""
+        MATCH (n)
+        WHERE any(label IN labels(n) WHERE label STARTS WITH '{label_prefix}')
+        DETACH DELETE n
+        """
+        self.query(delete_query)

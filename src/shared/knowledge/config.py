@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from langchain_community.graphs import Neo4jGraph
+from langchain_neo4j import Neo4jGraph
 
 from src.core.config import settings
 
@@ -73,3 +73,4 @@ class Neo4JGraphClient:
 
 
 graph_kg_client = Neo4JGraphClient()
+graph_kg_client.initialize()

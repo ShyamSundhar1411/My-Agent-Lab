@@ -1,4 +1,3 @@
-import json
 import logging
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -10,31 +9,21 @@ text_splitter = RecursiveCharacterTextSplitter(
 )
 
 
-def split_data_from_file(file: str):
-    logger.info(f"Loading file: {file}")
+def split_data(data: dict, source_name: str = "document"):
 
     chunks_with_metadata = []
 
-    try:
-        with open(file, "r", encoding="utf-8") as f:
-            file_as_object = json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to load JSON file: {file} | Error: {e}")
-        raise
-
-    if not isinstance(file_as_object, dict):
-        logger.error(f"Invalid JSON structure in {file} (expected dict)")
+    if not isinstance(data, dict):
+        logger.error("Invalid JSON structure in (expected dict)")
         raise ValueError("JSON root must be an object/dict")
 
-    keys = list(file_as_object.keys())
+    keys = list(data.keys())
     logger.info(f"Found {len(keys)} top-level keys")
-
-    form_name = file[file.rindex("/") + 1 : file.rindex(".")]
 
     total_chunks = 0
 
     for key in keys:
-        item_text = file_as_object.get(key)
+        item_text = data.get(key)
 
         if not isinstance(item_text, str):
             logger.warning(f"Skipping key '{key}' (not a string)")
@@ -44,7 +33,7 @@ def split_data_from_file(file: str):
         logger.info(f"Key '{key}' split into {len(item_text_chunks)} chunks")
 
         for chunk_seq_id, chunk in enumerate(item_text_chunks):
-            chunk_id = f"{form_name}#{key}#{chunk_seq_id}"
+            chunk_id = f"{source_name}#{key}#{chunk_seq_id}"
 
             chunks_with_metadata.append(
                 {
@@ -52,7 +41,7 @@ def split_data_from_file(file: str):
                     "formItem": key,
                     "chunkSeqId": chunk_seq_id,
                     "chunkId": chunk_id,
-                    "source": file_as_object.get("source"),
+                    "source": source_name,
                 }
             )
 

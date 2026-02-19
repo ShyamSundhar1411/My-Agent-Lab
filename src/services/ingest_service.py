@@ -1,7 +1,12 @@
 import logging
-from typing import Any, Dict
-
+from typing import Optional
+import json
+import io
 from src.shared.knowledge.stores.graph_store import GraphStoreClient
+from src.shared.knowledge.utils.chunking import split_data
+import pdfplumber
+from src.shared.llm.client import llm_client
+
 
 logger = logging.getLogger(__name__)
 
@@ -9,163 +14,106 @@ logger = logging.getLogger(__name__)
 class IngestService:
     def __init__(self):
         self.store = GraphStoreClient(collection_name="kg")
-        logger.info("IngestService initialized")
+        self.text_splitter = split_data
+        self.vector_index_created = False
 
-    def ingest_json(self, data: Dict[str, Any], source: str):
-        logger.info(f"Starting JSON ingestion | source={source}")
+    async def ingest_file_content(
+        self, content: bytes, filename: str, source: Optional[str] = None
+    ):
+        """
+        Detect file type by extension and ingest content accordingly
+        """
+        source = source or filename
+        if filename.endswith(".json"):
+            data = json.loads(content.decode("utf-8"))
+            await self._ingest_json(data, source)
+        elif filename.endswith(".pdf"):
+            text = self._extract_pdf_text(content)
+            await self._ingest_text_content(text, source)
+        elif filename.endswith(".txt"):
+            text = content.decode("utf-8")
+            await self._ingest_text_content(text, source)
+        else:
+            raise ValueError(f"Unsupported file type: {filename}")
 
-        try:
-            json_type = self._detect_json_type(data)
-            logger.info(f"JSON type detected | type={json_type} | source={source}")
+    async def _ensure_vector_index(
+        self, node_label="Chunk", vector_property="textEmbedding", dim=1536
+    ):
+        if not self.vector_index_created:
+            self.store.create_vector_index(
+                index_name=f"{node_label}_vector_index",
+                node_label=node_label,
+                vector_property=vector_property,
+                dimensions=dim,
+            )
+            self.vector_index_created = True
 
-            if json_type == "document":
-                self._ingest_document_json(data, source)
-
-            elif json_type == "structured":
-                self._ingest_structured_json(data, source)
-
-            else:
-                self._ingest_generic_json(data, source)
-
-            logger.info(f"JSON ingestion completed successfully | source={source}")
-
-        except Exception as e:
-            logger.exception(f"JSON ingestion failed | source={source} | error={e}")
-            raise
-
-    def _detect_json_type(self, data: Dict[str, Any]) -> str:
-        logger.debug("Detecting JSON type")
-
-        long_text_fields = 0
-        for v in data.values():
-            if isinstance(v, str) and len(v) > 300:
-                long_text_fields += 1
-
-        if long_text_fields >= 1:
-            logger.debug("Detected document-style JSON")
-            return "document"
-
-        if all(not isinstance(v, str) or len(v) < 200 for v in data.values()):
-            logger.debug("Detected structured JSON")
-            return "structured"
-
-        logger.debug("Detected generic JSON")
-        return "generic"
-
-    def _ingest_document_json(self, data: Dict[str, Any], source: str):
-        logger.info(f"Ingesting document JSON | source={source}")
+    async def _ingest_json(self, data: dict, source: str):
+        chunks = self.text_splitter(data, source_name=source)
 
         doc_id = self.store._id(source)
-
         self.store.upsert_node(
             "Document", doc_id, {"title": source, "type": "json_document"}
         )
 
-        logger.debug(f"Document node created | doc_id={doc_id}")
+        await self._ensure_vector_index(node_label="Chunk")
 
-        for key, value in data.items():
-            logger.debug(f"Processing section | section={key}")
+        for chunk_data in chunks:
+            chunk_id = chunk_data["chunkId"]
+            text = chunk_data["text"]
 
-            if key.lower() in ["source", "author", "origin", "created_at"]:
-                meta_id = self.store._id(str(value))
+            embedding = await llm_client.embed_text(text)
 
-                self.store.upsert_node(
-                    "Metadata", meta_id, {"key": key, "value": str(value)}
-                )
-
-                self.store.upsert_relation(
-                    "Document", doc_id, "Metadata", meta_id, "HAS_METADATA"
-                )
-
-                logger.debug(f"Metadata linked | key={key}")
-                continue
-
-            section_id = self.store._id(f"{doc_id}:{key}")
-
-            self.store.upsert_node("Section", section_id, {"name": key})
-
-            self.store.upsert_relation(
-                "Document", doc_id, "Section", section_id, "HAS_SECTION"
+            self.store.upsert_node(
+                "Chunk",
+                chunk_id,
+                {
+                    "text": text,
+                    "textEmbedding": embedding,
+                    "formItem": chunk_data.get("formItem"),
+                    "chunkSeqId": chunk_data.get("chunkSeqId"),
+                    "source": chunk_data.get("source"),
+                },
             )
 
-            logger.debug(f"Section created | section={key} | section_id={section_id}")
+            self.store.upsert_relation(
+                "Document", doc_id, "Chunk", chunk_id, "HAS_CHUNK"
+            )
 
-            if isinstance(value, str):
-                chunks = self._chunk_text(value)
-                logger.debug(f"Chunking section | section={key} | chunks={len(chunks)}")
+        logger.info(f"JSON ingestion complete | source={source} | chunks={len(chunks)}")
 
-                for i, chunk in enumerate(chunks):
-                    chunk_id = self.store._id(f"{section_id}:{i}")
+    async def _extract_pdf_text(self, content: bytes) -> str:
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            return "\n".join([page.extract_text() or "" for page in pdf.pages])
 
-                    self.store.upsert_node(
-                        "Chunk", chunk_id, {"text": chunk, "index": i}
-                    )
-
-                    self.store.upsert_relation(
-                        "Section", section_id, "Chunk", chunk_id, "HAS_CHUNK"
-                    )
-
-        logger.info(f"Document JSON ingestion done | source={source}")
-
-    def _ingest_structured_json(self, data: Dict[str, Any], source: str):
-        logger.info(f"Ingesting structured JSON | source={source}")
-
-        root_id = self.store._id(source)
-
+    async def _ingest_text_content(self, text: str, source: str):
+        chunks = self.text_splitter({"text": text})
+        doc_id = self.store._id(source)
         self.store.upsert_node(
-            "StructuredDocument", root_id, {"source": source, "type": "structured_json"}
+            "Document", doc_id, {"title": source, "type": "text_document"}
         )
 
-        logger.debug(f"Structured root node created | root_id={root_id}")
+        self._ensure_vector_index(node_label="Chunk")
 
-        self._walk_structure(data, root_id, "StructuredDocument")
+        for chunk_data in chunks:
+            chunk_id = chunk_data["chunkId"]
+            text = chunk_data["text"]
 
-        logger.info(f"Structured JSON ingestion done | source={source}")
+            embedding = llm_client.embed(text)
 
-    def _ingest_generic_json(self, data: Dict[str, Any], source: str):
-        logger.info(f"Ingesting generic JSON | source={source}")
-
-        root_id = self.store._id(source)
-
-        self.store.upsert_node("GenericJSON", root_id, {"source": source})
-
-        logger.debug(f"Generic root node created | root_id={root_id}")
-
-        self._walk_structure(data, root_id, "GenericJSON")
-
-        logger.info(f"Generic JSON ingestion done | source={source}")
-
-    def _walk_structure(self, obj: Any, parent_id: str, parent_label: str):
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                node_id = self.store._id(f"{parent_id}:{k}")
-
-                self.store.upsert_node("Node", node_id, {"name": k})
-
-                self.store.upsert_relation(
-                    parent_label, parent_id, "Node", node_id, "HAS_NODE"
-                )
-
-                logger.debug(f"Node created | key={k} | node_id={node_id}")
-
-                self._walk_structure(v, node_id, "Node")
-
-        elif isinstance(obj, list):
-            for item in obj:
-                self._walk_structure(item, parent_id, parent_label)
-
-        else:
-            val_id = self.store._id(str(obj))
-
-            self.store.upsert_node("Value", val_id, {"value": str(obj)})
-
-            self.store.upsert_relation(
-                parent_label, parent_id, "Value", val_id, "HAS_VALUE"
+            self.store.upsert_node(
+                "Chunk",
+                chunk_id,
+                {
+                    "text": text,
+                    "textEmbedding": embedding,
+                    "chunkSeqId": chunk_data.get("chunkSeqId"),
+                    "source": source,
+                },
             )
 
-            logger.debug(f"Value node created | value={obj}")
+            self.store.upsert_relation(
+                "Document", doc_id, "Chunk", chunk_id, "HAS_CHUNK"
+            )
 
-    def _chunk_text(self, text: str, size: int = 800):
-        chunks = [text[i : i + size] for i in range(0, len(text), size)]
-        logger.debug(f"Text chunked | total_chunks={len(chunks)}")
-        return chunks
+        logger.info(f"Text ingestion complete | source={source} | chunks={len(chunks)}")

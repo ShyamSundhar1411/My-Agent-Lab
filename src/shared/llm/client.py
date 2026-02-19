@@ -120,5 +120,10 @@ class LLMClient:
         embedding_list = await embeddings.aembed_documents(texts)
         return embedding_list
 
+    def embed(self, text: str):
+        import asyncio
+
+        return asyncio.run(self.embed_text(text))
+
 
 llm_client = LLMClient()

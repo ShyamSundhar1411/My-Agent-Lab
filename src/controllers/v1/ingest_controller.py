@@ -25,10 +25,10 @@ async def ingest_json_file(
     try:
         logger.info(f"Starting JSON file ingestion: {file.filename}")
         content = await file.read()
-        data = json.loads(content.decode("utf-8"))
-        source = file.filename
 
-        result = ingest_service.ingest_json(data, source)
+        result = await ingest_service.ingest_file_content(
+            content=content, filename=file.filename
+        )
 
         logger.info(f"JSON file ingestion completed successfully: {file.filename}")
         return JSONResponse(
